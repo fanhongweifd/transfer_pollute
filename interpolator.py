@@ -120,11 +120,6 @@ def interpolator(rows, interpolated_keys):
         interpolated_result = griddata(np.array(interpolated_data['point'].to_list()),
                                        np.array(values), (xi, yi), method='cubic')
         interpolated_results[interpolated_key] = interpolated_result
-        # contour = plt.contour(xi, yi, interpolated_result,[50, 55, 60, 70, 90, 10000])
-        # plt.clabel(contour, fontsize=10)
-        # plt.show()
-        # xi=np.linspace(min(x),max(x),300)
-        # yi=np.linspace(min(y),max(y),300)
     interpolated_results['grid_coordinate'] = (xi, yi)
     return interpolated_results
 
@@ -139,13 +134,6 @@ def get_contour(interpolated_results, interpolated_key , contour_values):
     interpolated_result = interpolated_results[interpolated_key]
     contour = plt.contour(X, Y, interpolated_result, contour_values)
     contour_lines = contour.allsegs
-
-    # field_grad = gradient(-interpolated_result)
-    # field_grad /= hypot(field_grad[0], field_grad[1])
-    ## 这是画向量
-    # plt.quiver(X[::2, ::2], Y[::2, ::2], field_grad[0, ::2, ::2], field_grad[1, ::2, ::2],)
-    # plt.clabel(contour, fontsize=10)
-    # plt.show()
     return contour_lines
 
 
@@ -226,6 +214,7 @@ def check_contour_grad_wind(contour_grads, oridata, key, delta = 20):
             # for line in contour_grad:
             coor = np.array(contour_grads[contour_i][contour_j]['points'])
             # 先拟合一下等高线上的风向
+            ####################这个插值方案不合适，要改#################################
             contour_wind = griddata(np.array(interpolated_data['point'].to_list()),
                                       np.array(values), (coor[:, 0], coor[:, 1]), method='cubic')
             degree_diff = abs(np.array(contour_grads[contour_i][contour_j]['degree'])-contour_wind)
@@ -243,53 +232,36 @@ def check_contour_grad_wind(contour_grads, oridata, key, delta = 20):
     return contour_grads
 
 
+def get_trajectory(datetime, pollution, values, delta=0.00001, plot=True, use_wind=False):
+    data_loader = DataLoader()
+    station_air_quality_rows = data_loader.load_station_air_quality(datetime)
+    station_air_quality_interpolated_results = interpolator(pd.DataFrame(station_air_quality_rows), [pollution])
+    contour_lines = get_contour(station_air_quality_interpolated_results, pollution, values)
+    contour_grads = get_contour_grad(contour_lines)
+    contour_grads = check_contour_grad(contour_grads, pd.DataFrame(station_air_quality_rows), pollution, delta=delta)
+
+    # 加风场
+    if use_wind:
+        station_weather_rows = data_loader.load_station_hour_weather(datetime)
+        contour_grads = check_contour_grad_wind(contour_grads, pd.DataFrame(station_weather_rows), 'wind_degrees')
+
+    # 画梯度
+    if plot:
+        interpolated_results = station_air_quality_interpolated_results['pm10']
+        (X, Y) = station_air_quality_interpolated_results['grid_coordinate']
+        plt.contour(X, Y, interpolated_results, values)
+        for contour_grad in contour_grads:
+            for line in contour_grad:
+                coor = np.array(line['points'])
+                if len(coor)>0:
+                    plt.quiver(coor[:, 0][::10], coor[:, 1][::10], line['grad_x'][::10], line['grad_y'][::10], width=0.001,scale=100)
+        plt.show()
+    return contour_grads
 
 
 if __name__ == '__main__':
-    data_loader = DataLoader()
-    station_air_quality_rows = data_loader.load_station_air_quality('2019-05-12 00:00:00')
-    station_air_quality_interpolated_results = interpolator(pd.DataFrame(station_air_quality_rows), ["pm10", "aqi"])
-    contour_lines = get_contour(station_air_quality_interpolated_results, 'pm10', [50,70,90])
-    print(contour_lines)
 
-    contour_grads = get_contour_grad(contour_lines)
-    contour_grads = check_contour_grad(contour_grads, pd.DataFrame(station_air_quality_rows), 'pm10', delta=0.00001)
+    contour_grads = get_trajectory('2019-05-12 00:00:00', 'pm10', [50,70,90], delta=0.00001, plot=True, use_wind=True)
 
-    # # 画梯度
-    # interpolated_results = station_air_quality_interpolated_results['pm10']
-    # (X, Y) = station_air_quality_interpolated_results['grid_coordinate']
-    # contour = plt.contour(X, Y, interpolated_results, [50,70,90])
-    #
-    # for contour_grad in contour_grads:
-    #     for line in contour_grad:
-    #         coor = np.array(line['points'])
-    #         # plt.quiver(coor[:,0], coor[:,1], line['grad_x'], line['grad_y'])
-    #         # intervel = 3
-    #         plt.quiver(coor[:, 0][::10], coor[:, 1][::10], line['grad_x'][::10], line['grad_y'][::10], width=0.001,scale=100)
-    # plt.show()
-
-
-
-    # print(station_air_quality_interpolated_results['pm10'])
-
-    station_weather_rows = data_loader.load_station_hour_weather('2019-05-12 00:00:00')
-    contour_grads = check_contour_grad_wind(contour_grads, pd.DataFrame(station_weather_rows), 'wind_degrees')
-
-    # 画梯度
-    interpolated_results = station_air_quality_interpolated_results['pm10']
-    (X, Y) = station_air_quality_interpolated_results['grid_coordinate']
-    contour = plt.contour(X, Y, interpolated_results, [50,70,90])
-
-    for contour_grad in contour_grads:
-        for line in contour_grad:
-            coor = np.array(line['points'])
-            # plt.quiver(coor[:,0], coor[:,1], line['grad_x'], line['grad_y'])
-            # intervel = 3
-            if len(coor)>0:
-                plt.quiver(coor[:, 0][::10], coor[:, 1][::10], line['grad_x'][::10], line['grad_y'][::10], width=0.001,scale=100)
-    plt.show()
-    # station_weather_interpolated_results = interpolator(pd.DataFrame(station_weather_rows), ["wind_degrees", "wind_speed"])
-    # station_weather_interpolated_results = interpolator(pd.DataFrame(station_weather_rows), ["wind_speed"])
-    # print(station_weather_interpolated_results['wind_degrees'])
 
 
