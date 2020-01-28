@@ -8,7 +8,7 @@ from scipy.interpolate import griddata
 from scipy import *
 import matplotlib.pyplot as plt
 import numpy as np
-
+interpolator_method='linear' #'linear', 'nearest', 'cubic'
 
 class DataLoader:
 
@@ -118,7 +118,7 @@ def interpolator(rows, interpolated_keys):
         interpolated_data.dropna(subset=[interpolated_key], inplace=True)
         values = interpolated_data[interpolated_key].dropna().to_list()
         interpolated_result = griddata(np.array(interpolated_data['point'].to_list()),
-                                       np.array(values), (xi, yi), method='cubic')
+                                       np.array(values), (xi, yi), method=interpolator_method)
         interpolated_results[interpolated_key] = interpolated_result
     interpolated_results['grid_coordinate'] = (xi, yi)
     return interpolated_results
@@ -134,7 +134,7 @@ def get_contour(interpolated_results, interpolated_key , contour_values):
     interpolated_result = interpolated_results[interpolated_key]
     contour = plt.contour(X, Y, interpolated_result, contour_values)
     contour_lines = contour.allsegs
-    return contour_lines
+    return contour, contour_lines
 
 
 def get_gradient(interpolated_results, interpolated_key):
@@ -184,12 +184,12 @@ def check_contour_grad(contour_grads, oridata, key, delta = 0.00001):
             coor = np.array(contour_grads[contour_i][contour_j]['points'])
             # 先拟合一下等高线的值
             contour_result = griddata(np.array(interpolated_data['point'].to_list()),
-                                           np.array(values), (coor[:,0], coor[:,1]), method='cubic')
+                                           np.array(values), (coor[:,0], coor[:,1]), method=interpolator_method)
             # 再拟合一下梯度方向的值,
             coor_dx = coor[:, 0] + np.array(contour_grads[contour_i][contour_j]['grad_x'])*delta
             coor_dy = coor[:, 1] + np.array(contour_grads[contour_i][contour_j]['grad_y'])*delta
             d_contour_result = griddata(np.array(interpolated_data['point'].to_list()),
-                                           np.array(values), (coor_dx, coor_dy), method='cubic')
+                                           np.array(values), (coor_dx, coor_dy), method=interpolator_method)
 
             wrong_list = np.where((contour_result - d_contour_result)<0)[0]
             for id in wrong_list:
@@ -200,7 +200,7 @@ def check_contour_grad(contour_grads, oridata, key, delta = 0.00001):
     return contour_grads
 
 
-def check_contour_grad_wind(contour_grads, oridata, key, delta = 20):
+def check_contour_grad_wind(contour_grads, oridata, key, delta=20):
     # 去掉和风向不同的梯度
     data = oridata['data'].to_list()
     points = oridata['point'].to_list()
@@ -216,7 +216,7 @@ def check_contour_grad_wind(contour_grads, oridata, key, delta = 20):
             # 先拟合一下等高线上的风向
             ####################这个插值方案不合适，要改#################################
             contour_wind = griddata(np.array(interpolated_data['point'].to_list()),
-                                      np.array(values), (coor[:, 0], coor[:, 1]), method='cubic')
+                                      np.array(values), (coor[:, 0], coor[:, 1]), method=interpolator_method)
             degree_diff = abs(np.array(contour_grads[contour_i][contour_j]['degree'])-contour_wind)
             idx = np.where((degree_diff < delta)|(degree_diff > 360-delta))[0]
             if len(idx)>0:
@@ -232,11 +232,11 @@ def check_contour_grad_wind(contour_grads, oridata, key, delta = 20):
     return contour_grads
 
 
-def get_trajectory(datetime, pollution, values, delta=0.00001, plot=True, use_wind=False):
+def get_trajectory(datetime, pollution, values, delta=0.00001, plot=True, use_wind=False, save_pic=False):
     data_loader = DataLoader()
     station_air_quality_rows = data_loader.load_station_air_quality(datetime)
     station_air_quality_interpolated_results = interpolator(pd.DataFrame(station_air_quality_rows), [pollution])
-    contour_lines = get_contour(station_air_quality_interpolated_results, pollution, values)
+    contours, contour_lines = get_contour(station_air_quality_interpolated_results, pollution, values)
     contour_grads = get_contour_grad(contour_lines)
     contour_grads = check_contour_grad(contour_grads, pd.DataFrame(station_air_quality_rows), pollution, delta=delta)
 
@@ -247,7 +247,7 @@ def get_trajectory(datetime, pollution, values, delta=0.00001, plot=True, use_wi
 
     # 画梯度
     if plot:
-        interpolated_results = station_air_quality_interpolated_results['pm10']
+        interpolated_results = station_air_quality_interpolated_results[pollution]
         (X, Y) = station_air_quality_interpolated_results['grid_coordinate']
         plt.contour(X, Y, interpolated_results, values)
         for contour_grad in contour_grads:
@@ -255,13 +255,40 @@ def get_trajectory(datetime, pollution, values, delta=0.00001, plot=True, use_wi
                 coor = np.array(line['points'])
                 if len(coor)>0:
                     plt.quiver(coor[:, 0][::10], coor[:, 1][::10], line['grad_x'][::10], line['grad_y'][::10], width=0.001,scale=100)
-        plt.show()
+        plt.title(datetime)
+        plt.clabel(contours, inline=True, fontsize=10, fmt='%1.1f')
+        # plt.show()
+
+    if save_pic:
+        plt.savefig(save_pic, dpi=500)
+        plt.cla()
     return contour_grads
 
 
 if __name__ == '__main__':
 
-    contour_grads = get_trajectory('2019-05-12 00:00:00', 'pm10', [50,70,90], delta=0.00001, plot=True, use_wind=True)
+    values = [80, 90, 100, 110, 120, 130, 140, 150, 160]
+    pollution = 'pm10'
 
-
-
+    contour_grads = get_trajectory('2019-05-12 21:00:00', pollution, values, delta=0.00001, plot=True,
+                                   use_wind=False, save_pic='2019-05-12 21:00:00')
+    contour_grads = get_trajectory('2019-05-12 22:00:00', pollution, values, delta=0.00001, plot=True,
+                                   use_wind=False, save_pic='2019-05-12 22:00:00')
+    contour_grads = get_trajectory('2019-05-12 23:00:00', pollution, values, delta=0.00001, plot=True,
+                                   use_wind=False, save_pic='2019-05-12 23:00:00')
+    contour_grads = get_trajectory('2019-05-13 00:00:00', pollution, values, delta=0.00001, plot=True,
+                                   use_wind=False, save_pic='2019-05-13 00:00:00')
+    contour_grads = get_trajectory('2019-05-13 01:00:00', pollution, values, delta=0.00001, plot=True,
+                                   use_wind=False, save_pic='2019-05-13 01:00:00')
+    contour_grads = get_trajectory('2019-05-13 02:00:00', pollution, values, delta=0.00001, plot=True,
+                                   use_wind=False, save_pic='2019-05-13 02:00:00')
+    contour_grads = get_trajectory('2019-05-13 03:00:00', pollution, values, delta=0.00001, plot=True,
+                                   use_wind=False, save_pic='2019-05-13 03:00:00')
+    contour_grads = get_trajectory('2019-05-13 04:00:00', pollution, values, delta=0.00001, plot=True,
+                                   use_wind=False, save_pic='2019-05-13 04:00:00')
+    contour_grads = get_trajectory('2019-05-13 05:00:00', pollution, values, delta=0.00001, plot=True,
+                                   use_wind=False, save_pic='2019-05-13 05:00:00')
+    contour_grads = get_trajectory('2019-05-13 06:00:00', pollution, values, delta=0.00001, plot=True,
+                                   use_wind=False, save_pic='2019-05-13 06:00:00')
+    contour_grads = get_trajectory('2019-05-13 07:00:00', pollution, values, delta=0.00001, plot=True,
+                                   use_wind=False, save_pic='2019-05-13 07:00:00')
